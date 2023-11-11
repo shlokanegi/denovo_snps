@@ -4,12 +4,13 @@ workflow vcfeval_denovos_wf {
     meta {
 	    author: "Shloka Negi"
         email: "shnegi@ucsc.edu"
-        description: "Workflow built over vcfeval with custom-filtering to generate annotated denovo candidates in a trio"
+        description: "Pipeline built over vcfeval with custom-filtering to generate annotated denovo candidates in a trio"
     }
 
     parameter_meta {
         FAMILY: "Family name"
         CHILD_VCF: "Child's long-read harmonized VCF. Gzipped"
+        SEX: "Child's sex"
         FATHER_VCF: "Father's long-read harmonized VCF. Gzipped"
         MOTHER_VCF: "Mother's long-read harmonized VCF. Gzipped"
         FATHER_BAM: "Sorted and indexed father's BAM with the long reads. Optional. If present, denovos will be re-evaluated with read support. Helps filtering false-positives out"
@@ -30,6 +31,7 @@ workflow vcfeval_denovos_wf {
 
     input {
         String FAMILY
+        String SEX
         File CHILD_VCF
         File FATHER_VCF
         File MOTHER_VCF
@@ -78,7 +80,8 @@ workflow vcfeval_denovos_wf {
         input:
         input_vcf=denovos_subset_vcf,
         mother_vcf=MOTHER_VCF,
-        father_vcf=FATHER_VCF
+        father_vcf=FATHER_VCF,
+        sex=SEX
     }
     
     # File denovos_filtered_vcf = run_filtering.vcf
@@ -121,13 +124,13 @@ workflow vcfeval_denovos_wf {
         }
     }
 
-    File denovos_rare_snpeff_clinvar_dbnsfp_vcf = select_first([subset_annotate_smallvars_with_db.vcf, denovos_rare_snpeff_vcf])
+    File denovos_rare_snpeff_clinvar_dbnsfp_vcf = select_first([subset_annotate_smallvars_with_db.snpeff_vcf, denovos_rare_snpeff_vcf])
 
     ## Effective denovo variant filtering using parent's BAMs to flag false-positives
     if (defined(FATHER_BAM) && defined(FATHER_BAM_INDEX) && defined(MOTHER_BAM) && defined(MOTHER_BAM_INDEX)){
         call validate_denovos {
             input:
-            input_vcf=denovos_rare_snpeff_clinvar_dbnsfp_vcf,
+            input_vcf=denovos_rare_vcf,
             mom_bam=select_first([MOTHER_BAM]),
             mom_bam_index=select_first([MOTHER_BAM_INDEX]),
             dad_bam=select_first([FATHER_BAM]),
@@ -136,17 +139,17 @@ workflow vcfeval_denovos_wf {
         }
     }
 
-    File final_vcf = select_first([validate_denovos.vcf, denovos_rare_snpeff_clinvar_dbnsfp_vcf])
-
+    File final_vcf = select_first([validate_denovos.vcf, denovos_rare_vcf])
 
     output {
-        # File denovos_all = denovos_vcf                                      # all denovos genome-wide
-        # File denovos_subset = denovos_subset_vcf                            # denovos in high-confidence regions
-        # File denovos_filtered = denovos_filtered_vcf                        # denovos in high-confidence regions post-filtering
-        # File denovos_flagged_snps = denovos_flagged_snps_vcf                # filtered denovo SNPs not called in both parents
-        # File? denovos_snps_annotated = annotate_denovo_snps.annotated_vcf   # filtered denovo SNPs annotated with gnomad AF
-        File denovos_snps_rare = denovos_rare_vcf                             # rare snp denovos
-        File denovos_final_vcf = final_vcf
+        # File denovos_all = denovos_vcf                                            # all denovos genome-wide
+        # File denovos_subset = denovos_subset_vcf                                  # denovos in high-confidence regions
+        # File denovos_filtered = denovos_filtered_vcf                              # denovos in high-confidence regions post-filtering
+        # File denovos_flagged_snps = denovos_flagged_snps_vcf                      # filtered denovo SNPs not called in both parents
+        # File? denovos_snps_annotated = annotate_denovo_snps.annotated_vcf         # filtered denovo SNPs annotated with gnomad AF
+        # File denovos_snps_rare = denovos_rare_vcf                                 # rare snp denovos
+        File snpeff_annotated_filtered_vcf = denovos_rare_snpeff_clinvar_dbnsfp_vcf # Filtered VCF with annotated denovos with snpeff, clinvar and dbnsfp
+        File denovos_final_vcf = final_vcf                                          # Validated final VCF, tagged with True positive denovos
     }
 }
 
@@ -250,6 +253,7 @@ task run_filtering {
         File input_vcf
         File mother_vcf
         File father_vcf
+        String sex
         Int memSizeGB = 48
         Int threadCount = 32
         Int diskSizeGB = 5*round((size(input_vcf, "GB") + size(father_vcf, "GB")) + size(mother_vcf, "GB")) + 20
@@ -260,12 +264,18 @@ task run_filtering {
     command <<<
         set -eux -o pipefail
         
-        ## Apply variant filters to non-svim_asm variants, to remove possible false-positive denovos.
-        zcat ~{input_vcf} | bcftools view --threads ~{threadCount} -i '((FORMAT/GQ>=20) & (FORMAT/DP>=20) & (FORMAT/GT!="1/1"))' | bcftools sort -Oz -o ~{basen}.filter.vcf.gz
+        ## Apply variant filters to remove possible false-positive denovos.
+        ## For Males, don't filter homozygous variants in chrX and chrY.
+        if [~{sex} = "Female"]
+        then 
+            zcat ~{input_vcf} | bcftools view --threads ~{threadCount} -i '((FORMAT/GQ>=20) & (FORMAT/DP>=20) & (FORMAT/GT!="1/1"))' | bcftools sort -Oz -o ~{basen}.filter.vcf.gz
+        else
+            zcat ~{input_vcf} | bcftools view --threads ~{threadCount} -i '((CHROM!="X" & CHROM!="Y") & ((FORMAT/GQ>=20) & (FORMAT/DP>=20) & (FORMAT/GT!="1/1"))) | ((FORMAT/GQ>=20) & (FORMAT/DP>=20))' | bcftools sort -Oz -o ~{basen}.filter.vcf.gz
+        fi
         tabix -p vcf ~{basen}.filter.vcf.gz
         ln -s ~{basen}.filter.vcf.gz filtered.vcf.gz
         ln -s ~{basen}.filter.vcf.gz.tbi filtered.vcf.gz.tbi
-
+        
         ## Index parent's VCFs
         tabix -p vcf ~{mother_vcf}; tabix -p vcf ~{father_vcf}
         ln -s ~{mother_vcf} mother.vcf.gz
@@ -400,18 +410,18 @@ task subset_annotate_smallvars_with_db {
         ln -s ~{dbnsfp_db_index} dbnsfp.txt.gz.tbi
         
         ## filter variants to keep those with high/moderate impact or with predicted loss of function
-        # zcat ~{input_vcf} | SnpSift -Xmx1g filter "(ANN[*].IMPACT has 'HIGH') | (ANN[*].IMPACT has 'MODERATE') | ((exists LOF[*].PERC) & (LOF[*].PERC > 0.9))" | gzip  > smallvars.vcf.gz
+        zcat ~{input_vcf} | SnpSift -Xmx1g filter "(ANN[*].IMPACT has 'HIGH') | (ANN[*].IMPACT has 'MODERATE') | ((exists LOF[*].PERC) & (LOF[*].PERC > 0.9))" | gzip  > snps.vcf.gz
 
         ## annotate IDs with clinvar IDs and add the CLNSIG INFO field
-        zcat ~{input_vcf} | SnpSift -Xmx~{snpsiftMem}g annotate -info CLNSIG -v clinvar.vcf.bgz | gzip > smallvars.clinvar.vcf.gz
+        zcat snps.vcf.gz | SnpSift -Xmx~{snpsiftMem}g annotate -info CLNSIG -v clinvar.vcf.bgz | gzip > snps.clinvar.vcf.gz
         
         ## annotate IDs with dbNSFP prediction scores and conservation scores
-        zcat smallvars.clinvar.vcf.gz > smallvars.clinvar.vcf
-        SnpSift -Xmx~{snpsiftMem}g dbnsfp -v -db dbnsfp.txt.gz -f GERP++_RS,CADD_raw,CADD_phred,MetaRNN_score,MetaRNN_pred,ALFA_Total_AF smallvars.clinvar.vcf | gzip > ~{basen}.clinvar.dbnsfp.vcf.gz
+        zcat snps.clinvar.vcf.gz > snps.clinvar..vcf
+        SnpSift -Xmx~{snpsiftMem}g dbnsfp -v -db dbnsfp.txt.gz -f GERP++_RS,CADD_raw,CADD_phred,MetaRNN_score,MetaRNN_pred,ALFA_Total_AF snps.clinvar.vcf | gzip > ~{basen}.clinvar.dbnsfp.vcf.gz
     >>>
 
     output {
-        File vcf = "~{basen}.clinvar.dbnsfp.vcf.gz"
+        File snpeff_vcf = "~{basen}.clinvar.dbnsfp.vcf.gz"
     }
 
     runtime {
@@ -447,8 +457,8 @@ task validate_denovos {
         ln -s ~{dad_bam_index} dad.bam.bai
 
         ## Validate and flag true positive de novos
-        python3 /opt/scripts/dnvval.py -v ~{input_vcf} -mbam mom.bam -dbam dad.bam -r ~{reference_fasta} -o ~{basen}.dvval.vcf
-        cat ~{basen}.dvval.vcf | bgzip > ~{basen}.dvval.vcf.gz
+        mkdir temp
+        python3 /opt/scripts/dnvval.py -v ~{input_vcf} -mbam mom.bam -dbam dad.bam -r ~{reference_fasta} -d temp -o ~{basen}.dvval.vcf.gz
 
     >>>
 
@@ -459,9 +469,7 @@ task validate_denovos {
     runtime {
         memory: memSizeGB + " GB"
         disks: "local-disk " + diskSizeGB + " SSD"
-        docker: "quay.io/shnegi/dvval@sha256:89233c11e7bb20f16294a7e7d56ce366741cbdbd0166bdaf833661bdb397e46d"
+        docker: "quay.io/shnegi/dnvval@sha256:5196b7e45e9acfa42e3dd6494802fe158cb349e0894ca90aa3445d5052ff4e62"
         preemptible: 1
     }
-
-
 }

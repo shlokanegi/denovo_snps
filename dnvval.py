@@ -15,13 +15,13 @@ def alt_present(pileup_output_path, alt):
                 return False
 
 
-def evaluate_dnv(dnv_info, ref_fa_path, mom_bam_path, dad_bam_path):
+def evaluate_dnv(dnv_info, ref_fa_path, mom_bam_path, dad_bam_path, output_dir):
     dump = open('/dev/null', 'w')
     region = '{}:{}-{}'.format(dnv_info['chrom'], dnv_info['pos'], dnv_info['pos'])
 
     # samtools pileup at variant position in mother's BAM
     pileup_args = ["samtools", "mpileup", "-r", region, "-f", ref_fa_path, mom_bam_path]
-    mom_pileup_ouput_path = os.path.join("mom.txt")
+    mom_pileup_ouput_path = os.path.join(output_dir, "mom.txt")
     with open(mom_pileup_ouput_path, 'w') as file:
         run(pileup_args, check=True, stdout=file,
             stderr=dump, universal_newlines=True)
@@ -32,7 +32,7 @@ def evaluate_dnv(dnv_info, ref_fa_path, mom_bam_path, dad_bam_path):
     # samtools pileup at variant position in father's BAM
     else:       
         pileup_args = ["samtools", "mpileup", "-r", region, "-f", ref_fa_path, dad_bam_path]
-        dad_pileup_ouput_path = os.path.join("dad.txt")
+        dad_pileup_ouput_path = os.path.join(output_dir, "dad.txt")
         with open(dad_pileup_ouput_path, 'w') as file:
             run(pileup_args, check=True, stdout=file,
                 stderr=sys.stderr, universal_newlines=True)
@@ -48,7 +48,7 @@ parser.add_argument('-dbam', help='BAM file (indexed)', required=True)
 parser.add_argument('-r', help='reference FASTA file (indexed)', required=True)
 parser.add_argument('-v', help='VCF file (can be bgzipped)',required=True)
 parser.add_argument('-o', default='out.vcf', help='output (annotated) VCF (will be bgzipped if ending in .gz)')
-# parser.add_argument('-d', help='output directory', default='temp_valsv')
+parser.add_argument('-d', help='output directory', default='temp_valsv')
 args = parser.parse_args()
 
 vcf = VCF(args.v)
@@ -65,16 +65,11 @@ for variant in vcf:
     dnvinfo['pos'] = variant.POS
     dnvinfo['alt'] = variant.ALT
 
-    flag = evaluate_dnv(dnvinfo, args.r, args.mbam, args.dbam)
+    flag = evaluate_dnv(dnvinfo, args.r, args.mbam, args.dbam, args.d)
     if flag == 'TP':
         variant.INFO['flag'] = 'TP'
 
     vcf_o.write_record(variant)
-
-
-# os.path.join(output_dir, sv_info['svid'] + ".vcf")
-bgzip_args = ["bgzip", "-c", vcf_o]
-vcf_path_gz = vcf_o + '.gz'
 
 vcf_o.close()
 vcf.close()
