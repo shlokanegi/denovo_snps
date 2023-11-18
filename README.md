@@ -6,20 +6,21 @@ It will run samtools pileup for each variant with both mother's and father's BAM
 The inputs of `dnvval.py` are:
 
 ```
-root@0a5dd60eee5f:/home# python3 /opt/scripts/dnvval.py --help
-usage: dnvval.py [-h] -mbam MBAM -dbam DBAM -r R -v V [-o O]
+root@3df923e5c1cd:/home# python3 /opt/scripts/dnvval.py --help
+usage: dnvval.py [-h] -mbam MBAM -dbam DBAM -r R -v V [-o O] [-d D] [-t T]
 
 optional arguments:
   -h, --help  show this help message and exit
-  -mbam MBAM  mother's BAM file (indexed)
-  -dbam DBAM  father's BAM file (indexed)
+  -mbam MBAM  BAM file (indexed)
+  -dbam DBAM  BAM file (indexed)
   -r R        reference FASTA file (indexed)
   -v V        VCF file (can be bgzipped)
-  -o O        output (annotated) VCF. Will not be bgzipped
+  -o O        output (annotated) VCF (will be bgzipped if ending in .gz)
+  -d D        output directory
+  -t T        number of threads used by bcftools mpileup
 ```
-
 One new INFO field is added in the output VCF:
 
-- `flag` with the 'TP' label, if the variant was not round in any other the reads in both parents.
+- `TP` with a value of '1', if the variant was not found in any reads in both parents.
 
-To build locally and upload to [quay.io](https://quay.io/shnegi/dvval).
+To build locally and upload to [quay.io](https://quay.io/shnegi/dnvval).
