@@ -33,14 +33,6 @@ RUN wget --no-check-certificate https://github.com/samtools/bcftools/releases/do
         ./configure && make && make install && \
         cd .. && rm -rf bcftools-1.17.tar.bz2
 
-## samtools
-RUN wget --no-check-certificate https://github.com/samtools/samtools/releases/download/1.17/samtools-1.17.tar.bz2 && \
-    tar -xjvf samtools-1.17.tar.bz2 && \
-    cd samtools-1.17 && \
-    ./configure && \
-    make && \
-    make install
-
 # python packages
 RUN pip3 install cyvcf2
 
