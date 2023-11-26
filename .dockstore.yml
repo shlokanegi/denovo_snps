@@ -1,0 +1,9 @@
+version: 1.2
+workflows:
+  - name: denovo_snps
+    subclass: WDL
+    description: generates an annotated de novo VCF using trio variant calls
+    primaryDescriptorPath: /workflow.wdl
+    authors:
+      - name: Shloka Negi
+        email: shnegi@ucsc.edu
